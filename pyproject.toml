@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "lpix"
+version = "0.1.0"
+description = "RAG system for Launchpad bug tracker tickets"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "launchpadlib>=2.0.0",
+    "sentence-transformers>=3.0.0",
+    "chromadb>=0.5.0",
+    "rank-bm25>=0.2.2",
+    "tqdm>=4.66.0",
+    "click>=8.1.0",
+]
+
+[project.optional-dependencies]
+rerank = [
+    "torch>=2.0.0",  # needed for cross-encoder reranking
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+lpix = "lpix.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["lpix*"]
