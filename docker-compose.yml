@@ -1,0 +1,78 @@
+services:
+
+  # ── lpix: Launchpad RAG service ───────────────────────────────────────────
+  lpix:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lpix
+    restart: unless-stopped
+
+    environment:
+      # REQUIRED: shared secret — Hermes uses this to authenticate
+      # Generate with: openssl rand -hex 32
+      API_KEY: ${LPIX_API_KEY:?Set LPIX_API_KEY in .env}
+
+      # Optional: Launchpad project to auto-sync on startup
+      # LP_AUTO_SYNC_PROJECT: ubuntu
+      # LP_AUTO_SYNC_LIMIT: "500"
+
+      # Storage paths (match the VOLUME declarations in Dockerfile)
+      LPIX_CHROMA_PATH: /data/chroma_db
+      LPIX_CREDS_PATH: /data/lp_creds
+      LPIX_SYNC_PATH: /data/sync/state.json
+      LPIX_BM25_PATH: /data/sync/bm25_index.pkl
+
+    volumes:
+      # Named volumes — persist across container rebuilds/restarts
+      - lpix_chroma:/data/chroma_db      # vector store + HNSW index
+      - lpix_creds:/data/lp_creds        # Launchpad OAuth tokens
+      - lpix_sync:/data/sync             # sync state + BM25 index
+
+    ports:
+      # Only expose to localhost — Hermes reaches it via Docker network name "lpix"
+      # Remove this if you don't need host access (e.g. for curl testing)
+      - "127.0.0.1:8080:8080"
+
+    networks:
+      - lpix_net
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ── hermes: add to your existing Hermes compose file instead ─────────────
+  # This block is a reference — in practice, add the lpix_net network and
+  # LPIX_URL/LPIX_API_KEY env vars to your existing Hermes service definition.
+  #
+  # hermes:
+  #   image: your-hermes-image
+  #   environment:
+  #     LPIX_URL: http://lpix:8080       # Docker DNS — resolves via lpix_net
+  #     LPIX_API_KEY: ${LPIX_API_KEY}    # same value as above
+  #   networks:
+  #     - lpix_net                       # must be on the same network
+  #   depends_on:
+  #     lpix:
+  #       condition: service_healthy
+
+
+networks:
+  lpix_net:
+    driver: bridge
+    # If Hermes is on a different compose project, use an external network:
+    # external: true
+    # name: hermes_default
+
+
+volumes:
+  lpix_chroma:
+    driver: local
+  lpix_creds:
+    driver: local
+  lpix_sync:
+    driver: local

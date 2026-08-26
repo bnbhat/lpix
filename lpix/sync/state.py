@@ -24,13 +24,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STATE_PATH = Path.home() / ".lpix" / "sync_state.json"
+DEFAULT_STATE_PATH = Path(os.environ.get("LPIX_SYNC_PATH", Path.home() / ".lpix" / "sync_state.json"))
 
 
 class SyncState:

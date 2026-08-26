@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -38,8 +39,8 @@ from lpix.ingestion.launchpad import BugChunk
 
 logger = logging.getLogger(__name__)
 
-# Default storage location
-DEFAULT_DB_PATH = Path.home() / ".lpix" / "chroma_db"
+# Default storage location — overridden by LPIX_CHROMA_PATH env var (used in container)
+DEFAULT_DB_PATH = Path(os.environ.get("LPIX_CHROMA_PATH", Path.home() / ".lpix" / "chroma_db"))
 
 
 class BugVectorStore:

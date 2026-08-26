@@ -27,6 +27,7 @@ Reranking:
 from __future__ import annotations
 
 import logging
+import os
 import pickle
 import time
 from pathlib import Path
@@ -36,7 +37,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BM25_PATH = Path.home() / ".lpix" / "bm25_index.pkl"
+DEFAULT_BM25_PATH = Path(os.environ.get("LPIX_BM25_PATH", Path.home() / ".lpix" / "bm25_index.pkl"))
 
 
 class BM25Index:
