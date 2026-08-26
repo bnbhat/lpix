@@ -1,0 +1,4 @@
+name: lpix
+version: "0.1.0"
+description: "Launchpad Bug Tracker RAG — semantic search over bug reports, comments, and history"
+requires_env: []

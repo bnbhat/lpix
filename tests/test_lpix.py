@@ -7,12 +7,12 @@ from unittest.mock import MagicMock, patch
 from lpix.ingestion.launchpad import BugChunk, bug_to_chunks
 from lpix.embedding.model import EmbeddingModel, BGE_QUERY_PREFIX
 from lpix.retrieval.hybrid import BM25Index, reciprocal_rank_fusion
+from lpix.tools import _deduplicate_by_bug
 
 
 # ── Chunking tests ──────────────────────────────────────────────────────────
 
 def make_bug_data(**kwargs):
-    """Helper: create minimal bug_data dict."""
     base = {
         "bug_id": 12345,
         "bug_url": "https://bugs.launchpad.net/bugs/12345",
@@ -44,22 +44,21 @@ def test_bug_to_chunks_description_only():
 
 def test_bug_to_chunks_with_comments():
     """A bug with 2 comments produces 3 chunks (description + 2 comments)."""
-    # Mock message objects
     msg1 = MagicMock()
     msg1.content = "I can reproduce this on Ubuntu 22.04."
     msg1.owner_link = "https://api.launchpad.net/1.0/~testuser"
     msg1.date_created = MagicMock()
     msg1.date_created.isoformat.return_value = "2024-01-02T00:00:00+00:00"
-    
+
     msg2 = MagicMock()
     msg2.content = "Fixed in commit abc123."
     msg2.owner_link = "https://api.launchpad.net/1.0/~devuser"
     msg2.date_created = MagicMock()
     msg2.date_created.isoformat.return_value = "2024-01-03T00:00:00+00:00"
-    
-    bug = make_bug_data(messages=[MagicMock(), msg1, msg2])  # messages[0] = description (skipped)
+
+    bug = make_bug_data(messages=[MagicMock(), msg1, msg2])
     chunks = bug_to_chunks(bug)
-    
+
     assert len(chunks) == 3
     assert chunks[0].chunk_type == "description"
     assert chunks[1].chunk_type == "comment"
@@ -74,7 +73,7 @@ def test_chunk_text_truncation():
     long_desc = "X" * 5000
     bug = make_bug_data(description=long_desc)
     chunks = bug_to_chunks(bug, max_comment_length=2000)
-    assert len(chunks[0].text) < 3000  # header + 2000 chars
+    assert len(chunks[0].text) < 3000
 
 
 def test_chunk_id_uniqueness():
@@ -84,11 +83,11 @@ def test_chunk_id_uniqueness():
     msg.owner_link = "https://api.launchpad.net/1.0/~user"
     msg.date_created = MagicMock()
     msg.date_created.isoformat.return_value = "2024-01-02T00:00:00+00:00"
-    
+
     bug = make_bug_data(messages=[MagicMock(), msg])
     chunks = bug_to_chunks(bug)
     ids = [c.chunk_id for c in chunks]
-    assert len(ids) == len(set(ids)), "Chunk IDs must be unique"
+    assert len(ids) == len(set(ids))
 
 
 def test_chunk_metadata_completeness():
@@ -113,20 +112,19 @@ def test_bm25_build_and_search():
         "nova live migration failure",
     ]
     ids = [f"chunk-{i}" for i in range(len(texts))]
-    
+
     bm25 = BM25Index()
     bm25.build(ids, texts)
-    
+
     results = bm25.search("nova crash", n=4)
     assert len(results) > 0
     top_ids = [r[0] for r in results]
-    assert "chunk-0" in top_ids  # nova + crash both in chunk-0
-    assert results[0][1] > 0  # positive score
+    assert "chunk-0" in top_ids
+    assert results[0][1] != 0
 
 
 def test_bm25_empty_returns_empty():
     bm25 = BM25Index()
-    # Not built
     results = bm25.search("anything")
     assert results == []
 
@@ -148,7 +146,6 @@ def test_rrf_merges_lists():
     list2 = ["b", "d", "a"]
     result = reciprocal_rank_fusion([list1, list2])
     ids = [r[0] for r in result]
-    # "a" and "b" appear in both lists — should rank higher than "c" or "d"
     top2 = set(ids[:2])
     assert top2 == {"a", "b"}
 
@@ -164,35 +161,27 @@ def test_rrf_empty():
     assert result == []
 
 
-# ── Embedding model tests (no actual model load) ─────────────────────────────
+# ── Embedding model tests ────────────────────────────────────────────────────
 
 def test_embedding_model_query_prefix():
-    """BGE models should apply the instruction prefix to queries."""
     model = EmbeddingModel(model_name="BAAI/bge-small-en-v1.5")
-    
     with patch.object(model, '_load'), \
          patch.object(model, '_model') as mock_model:
         mock_model.encode.return_value = np.zeros(384)
         mock_model.get_sentence_embedding_dimension.return_value = 384
         model._model = mock_model
-        
         model.encode_query("test query")
-        
         call_args = mock_model.encode.call_args[0][0]
         assert BGE_QUERY_PREFIX in call_args
 
 
 def test_embedding_model_no_prefix_for_documents():
-    """Documents should NOT get the BGE prefix."""
     model = EmbeddingModel(model_name="BAAI/bge-small-en-v1.5")
-    
     with patch.object(model, '_load'), \
          patch.object(model, '_model') as mock_model:
         mock_model.encode.return_value = np.zeros((2, 384))
         model._model = mock_model
-        
         model.encode_documents(["doc1", "doc2"], show_progress=False)
-        
         call_args = mock_model.encode.call_args[0][0]
         assert BGE_QUERY_PREFIX not in call_args[0]
 
@@ -202,16 +191,14 @@ def test_embedding_model_no_prefix_for_documents():
 def test_sync_state_roundtrip(tmp_path):
     from lpix.sync.state import SyncState
     from datetime import datetime, timezone
-    
+
     state = SyncState(path=tmp_path / "sync.json")
-    
     assert state.get_last_sync("ubuntu") is None
-    
+
     dt = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
     state.set_last_sync("ubuntu", dt)
     state.save()
-    
-    # Reload from disk
+
     state2 = SyncState(path=tmp_path / "sync.json")
     loaded = state2.get_last_sync("ubuntu")
     assert loaded is not None
@@ -221,12 +208,44 @@ def test_sync_state_roundtrip(tmp_path):
 
 def test_sync_state_reset(tmp_path):
     from lpix.sync.state import SyncState
-    
+
     state = SyncState(path=tmp_path / "sync.json")
     state.set_last_sync("nova")
     state.set_last_sync("ubuntu")
     state.save()
-    
+
     state.reset("nova")
     assert state.get_last_sync("nova") is None
     assert state.get_last_sync("ubuntu") is not None
+
+
+# ── Deduplication test ───────────────────────────────────────────────────────
+
+def test_deduplicate_by_bug():
+    """Max 2 chunks per bug_id should be enforced."""
+    results = [
+        {"metadata": {"bug_id": 1}, "text": "a"},
+        {"metadata": {"bug_id": 1}, "text": "b"},
+        {"metadata": {"bug_id": 1}, "text": "c"},  # should be dropped
+        {"metadata": {"bug_id": 2}, "text": "d"},
+        {"metadata": {"bug_id": 2}, "text": "e"},
+        {"metadata": {"bug_id": 2}, "text": "f"},  # should be dropped
+    ]
+    deduped = _deduplicate_by_bug(results, max_per_bug=2)
+    assert len(deduped) == 4
+    bug1_chunks = [r for r in deduped if r["metadata"]["bug_id"] == 1]
+    bug2_chunks = [r for r in deduped if r["metadata"]["bug_id"] == 2]
+    assert len(bug1_chunks) == 2
+    assert len(bug2_chunks) == 2
+
+
+def test_deduplicate_preserves_order():
+    """Deduplication should preserve result order."""
+    results = [
+        {"metadata": {"bug_id": 3}, "text": "first"},
+        {"metadata": {"bug_id": 1}, "text": "second"},
+        {"metadata": {"bug_id": 2}, "text": "third"},
+    ]
+    deduped = _deduplicate_by_bug(results, max_per_bug=1)
+    texts = [r["text"] for r in deduped]
+    assert texts == ["first", "second", "third"]
